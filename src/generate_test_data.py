@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 # Create data directory if it doesn't exist
-data_dir = Path("./data/raw")
+data_dir = Path("../data/raw")
 data_dir.mkdir(parents=True, exist_ok=True)
 
 # Generate valid data

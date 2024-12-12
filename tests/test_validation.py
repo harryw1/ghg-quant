@@ -20,7 +20,7 @@ def test_validate_valid_data(validator):
     """Test validation of correctly formatted data."""
     valid_data = pd.DataFrame(
         {
-            "date": pd.date_range("2020-01-01", "2020-12-31", freq="M"),
+            "date": pd.date_range("2020-01-01", "2020-12-31", freq="ME"),
             "emissions": [100.0] * 12,
         }
     )

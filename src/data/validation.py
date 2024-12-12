@@ -42,7 +42,7 @@ class GHGDataValidator:
             if "date" in df.columns:
                 try:
                     # Try to convert dates and catch any conversion errors
-                    df["date"] = pd.to_datetime(df["date"])
+                    df["date"] = pd.to_datetime(df["date"], format="%Y-%m-%d")
                 except (ValueError, TypeError):
                     issues["date_errors"].append("Invalid date format in date column")
                 else:
