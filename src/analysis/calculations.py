@@ -4,5 +4,3 @@
 
 def calculate_metrics(data):
     """Calculate metrics from data."""
-    # TODO: implement
-    return data

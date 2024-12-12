@@ -8,8 +8,6 @@ import pandas as pd
 
 
 class GHGDataValidator:
-    """Validates GHG emissions data structure and content."""
-
     def __init__(self):
         """Initialize validator."""
         self.logger = logging.getLogger(__name__)
@@ -26,15 +24,7 @@ class GHGDataValidator:
         }
 
     def validate_dataframe(self, df: pd.DataFrame) -> Dict[str, List[str]]:
-        """Validate a DataFrame against GHG data requirements.
-
-        Args:
-            df: DataFrame to validate
-
-        Returns:
-            Dictionary of validation issues found
-
-        """
+        """Validate a DataFrame against GHG data requirements."""
         issues = {
             "missing_columns": [],
             "type_errors": [],
@@ -48,35 +38,37 @@ class GHGDataValidator:
                 issues["missing_columns"].append(f"Missing required column: {col}")
 
         if not issues["missing_columns"]:
-            # Check data types
-            for col, expected_type in self.required_columns.items():
-                if not pd.api.types.is_dtype_equal(df[col].dtype, expected_type):
-                    try:
-                        # Attempt to convert
-                        df[col] = df[col].astype(expected_type)
-                    except ValueError:
-                        issues["type_errors"].append(
-                            f"Column {col} could not be converted to {expected_type}"
-                        )
-
-            # Check value ranges
-            for col, rules in self.validation_rules.items():
-                if col in df.columns:
-                    mask = (df[col] < rules["min"]) | (df[col] > rules["max"])
-                    if mask.any():
-                        issues["value_errors"].append(
-                            f"Column {col} contains values outside valid range "
-                            f"[{rules['min']}, {rules['max']}]"
-                        )
-
-            # Validate date format and range
+            # Handle date column separately
             if "date" in df.columns:
                 try:
+                    # Try to convert dates and catch any conversion errors
                     df["date"] = pd.to_datetime(df["date"])
+                except (ValueError, TypeError):
+                    issues["date_errors"].append("Invalid date format in date column")
+                else:
+                    # Check for future dates only if conversion succeeded
                     future_dates = df["date"] > pd.Timestamp.now()
                     if future_dates.any():
                         issues["date_errors"].append("Found dates in the future")
-                except ValueError:
-                    issues["date_errors"].append("Invalid date format")
+
+            # Handle emissions column
+            if "emissions" in df.columns:
+                try:
+                    df["emissions"] = pd.to_numeric(df["emissions"], errors="raise")
+                except (ValueError, TypeError):
+                    issues["type_errors"].append(
+                        "Column emissions contains non-numeric values"
+                    )
+                else:
+                    # Check value ranges only if conversion succeeded
+                    rules = self.validation_rules["emissions"]
+                    mask = (df["emissions"] < rules["min"]) | (
+                        df["emissions"] > rules["max"]
+                    )
+                    if mask.any():
+                        issues["value_errors"].append(
+                            f"Column emissions contains values outside valid range "
+                            f"[{rules['min']}, {rules['max']}]"
+                        )
 
         return issues

@@ -1,9 +1,12 @@
 """Module to run the pipeline."""
-# src/pipeline.py
 
-from src.analysis.calculations import calculate_metrics
-from src.data.preprocess import clean_data, validate_data
-from src.visualizations.plots import plot_data
+# src/pipeline.py
+import os
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.data.ingestion import DataIngestion
+from src.data.validation import GHGDataValidator
 
 
 class DataPipeline:
@@ -11,20 +14,22 @@ class DataPipeline:
 
     def __init__(self, data):
         """Initialize the pipeline."""
-        self.data = "./data/input.csv"
-        self.cleaned_data = None
-        self.validated_data = None
-        self.metrics_data = None
-        self.plot_data = None
+        self.data = data
+        self.ingestion = DataIngestion(data)
+        self.validator = GHGDataValidator()
 
     def run(self):
         """Run the pipeline."""
-        self.cleaned_data = clean_data(self.data)
-        self.validated_data = validate_data(self.cleaned_data)
-        self.metrics_data = calculate_metrics(self.validated_data)
-        self.plot_data = plot_data(self.metrics_data)
+        self.it(self.ingestion.read_and_validate_all_files())
+
+    def it(self, data):
+        """Iterate over the data."""
+        for filename, df in data.items():
+            print(filename)
+            print(df.head())
+            print(self.validator.validate_dataframe(df))
 
 
 if __name__ == "__main__":
-    pipeline = DataPipeline()
+    pipeline = DataPipeline(data="./data/raw/ghg-emissions.csv")
     pipeline.run()
