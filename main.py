@@ -1,62 +1,52 @@
-import os
 from pathlib import Path
 
 from src.data.ingestion import DataIngestion
+from src.data.sources.epa import EPADataSource
 from src.visualizations.plots import create_emissions_plots
 
 
-def main():
-    """Main function to run the GHG emissions analysis."""
-    print("\n=== GHG Emissions Analysis Tool ===\n")
+def analyze_state_emissions(state_code: str):
+    """Analyze emissions for a specific state."""
+    print(f"\nAnalyzing emissions for state: {state_code}")
 
-    # Set up paths
-    current_dir = Path(os.path.dirname(os.path.abspath(__file__)))
-    data_dir = current_dir / "data" / "raw"
-    output_dir = current_dir / "output"
-    output_dir.mkdir(exist_ok=True)
+    # Initialize EPA data source for state
+    source = EPADataSource(state_code=state_code)
 
-    print(f"Reading data from: {data_dir}")
-    print(f"Saving outputs to: {output_dir}\n")
-
-    # Initialize data ingestion
-    ingestion = DataIngestion(data_dir)
-
-    # List available files
-    print("Available data files:")
-    for file in ingestion.list_available_files():
-        print(f"- {file}")
-    print()
+    # Initialize data ingestion with source
+    ingestion = DataIngestion(source)
 
     try:
-        # Read and validate the valid data file
-        print("Processing valid_ghg_emissions.csv...")
-        df = ingestion.read_file("valid_ghg_emissions.csv")
-        print("Data validation successful!")
-        print(f"Number of records: {len(df)}")
-        print("\nFirst few rows of the data:")
+        # Read and validate data
+        print("Fetching and validating data...")
+        df = ingestion.read_data()
+
+        # Set up output directory
+        output_dir = Path("output") / state_code.lower()
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        print("\nData summary:")
+        print(f"Total records: {len(df)}")
+        print("\nFirst few rows:")
         print(df.head())
-        print("\nBasic statistics:")
-        print(df.describe())
 
         # Create visualizations
-        print("\nGenerating plots...")
-        figures = create_emissions_plots(df, output_dir=str(output_dir))
-        print(f"Plots saved to: {output_dir}")
-        print("Generated plots:")
-        for plot_name in figures.keys():
-            print(f"- {plot_name}.png")
+        print("\nGenerating visualizations...")
+        create_emissions_plots(df, output_dir=str(output_dir))
 
-        # Try to process invalid data file to demonstrate validation
-        print("\nAttempting to process invalid_ghg_emissions.csv...")
-        ingestion.read_file("invalid_ghg_emissions.csv")
+        print(f"\nOutputs saved to: {output_dir}")
 
-    except ValueError as e:
-        print(f"\nValidation Error: {e}")
+        return df, None
+
     except Exception as e:
-        print(f"\nAn error occurred: {e}")
+        print(f"\nError during analysis: {e}")
+        return None, None
 
-    print("\nAnalysis complete!")
+def main():
+    """Main function to run the GHG emissions analysis."""
+    print("\n=== GHG Emissions Analysis Tool ===")
 
+    # Example: Analyze New Jersey emissions
+    df, stats = analyze_state_emissions("NJ")
 
 if __name__ == "__main__":
     main()
