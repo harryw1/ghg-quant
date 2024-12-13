@@ -1,0 +1,11 @@
+facility_id,facility_name,reporting_year,fuel_type,unit_name,unit_type,tier1_co2_combustion_emissions,tier1_ch4_combustion_emissions,tier1_n2o_combustion_emissions,annual_heat_input,annual_heat_input_uom
+1011685,Warren County Power Station,2014,Natural Gas (Weighted U.S. Average),B-1,"OB (Boiler, other)",,,,,
+1003300,Celanese Acetate LLC - Manufacturing Processes,2016,Natural Gas (Weighted U.S. Average),GP-Ketene Furnaces,OCS (Other combustion source),,,,,
+1005420,COVE POINT LNG FACILITY,2019,Natural Gas (Weighted U.S. Average),Gas Turbine 111JB,"SCCT (CT (Turbine, simple cycle combustion))",,,,,
+1000898,Eddystone Generating Station,2013,Distillate Fuel Oil No. 2,Aux Boiler C,"OB (Boiler, other)",,,,,
+1007740,HAWAIIAN ELECTRIC COMPANY (HECO) KAHE GENERATING STATION,2016,Distillate Fuel Oil No. 2,K4,"OB (Boiler, other)",,,,,
+1008245,Blessing Station,2023,Natural Gas (Weighted U.S. Average),40702,RICE (Reciprocating internal combustion engine),,,,,
+1000979,Blount Street,2017,Natural Gas (Weighted U.S. Average),GP-5,OCS (Other combustion source),,,,,
+1013186,Hartree Channelview Facility,2023,Natural Gas (Weighted U.S. Average),H-3 Crude Charge Heater,PRH (Process Heater),,,,,
+1006440,Stony Point,2011,Natural Gas (Weighted U.S. Average),1004,RICE (Reciprocating internal combustion engine),,,,,
+1007135,GEORGIA PACIFIC Palatka LLC,2019,Natural Gas (Weighted U.S. Average),EU 016 No.4 Combination Boiler,S (Stoker Boiler),,,,,

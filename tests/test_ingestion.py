@@ -9,7 +9,9 @@ import pandas as pd
 import pytest
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.data import DataIngestion
 from src.data.ingestion import DataIngestion
+from src.data.sources.epa import EPADataSource
 
 # Set up the test data path
 TEST_DATA_PATH = Path("src/data/raw")
@@ -44,3 +46,39 @@ def test_list_available_files():
 
     assert "valid_ghg_emissions.csv" in files
     assert "invalid_ghg_emissions.csv" in files
+
+def test_epa_data_ingestion():
+    """Test EPA data ingestion."""
+    ingestion = DataIngestion(
+        source='epa',
+        state_code='NJ',
+        year=2022
+    )
+    assert isinstance(ingestion.source, EPADataSource)
+
+
+def test_epa_data_fetch():
+    """Test fetching EPA data."""
+    ingestion = DataIngestion(
+        source='epa',
+        state_code='NJ',
+        year=2022
+    )
+    df = ingestion.read_data(
+        table="ghg.gh_ghgrp_data",
+        filters={"state_code": "NJ", "year": 2022}
+    )
+    assert not df.empty
+    assert "emissions" in df.columns
+    assert "state" in df.columns
+
+
+def test_invalid_table():
+    """Test handling of invalid table name."""
+    ingestion = DataIngestion(
+        source='epa',
+        state_code='NJ',
+        year=2022
+    )
+    with pytest.raises(ValueError):
+        ingestion.read_data(table="invalid_table")
