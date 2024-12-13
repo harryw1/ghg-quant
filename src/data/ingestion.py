@@ -19,17 +19,13 @@ class DataIngestion:
         state_code: Optional[str] = None,
         year: Optional[int] = None,
     ):
-        """Initialize data ingestion.
-
-        Args:
-            source: Data source or path to data file
-            state_code: State code for EPA data (e.g., 'NJ')
-            year: Year to fetch data for
-        """
+        """Initialize data ingestion."""
         self.validator = GHGDataValidator()
         self._setup_logging()
 
         if isinstance(source, str) and source.lower() == "epa":
+            if not state_code:
+                raise ValueError("state_code is required for EPA data source")
             self.source = EPADataSource(state_code=state_code, year=year)
             self.raw_data_path = None
         elif isinstance(source, DataSource):
@@ -39,6 +35,29 @@ class DataIngestion:
             self.source = None
             self.raw_data_path = Path(source)
 
+    def read_data(
+        self,
+        filters: Optional[Dict] = None,
+        validate: bool = True,
+    ) -> pd.DataFrame:
+        """Read data from the configured source."""
+        if isinstance(self.source, EPADataSource):
+            self.logger.info("Reading EPA data from efservice endpoint")
+            df = self.source.fetch_data(filters=filters)
+
+            if validate:
+                self.logger.info("Validating data")
+                validation_issues = self.validator.validate_dataframe(df)
+                if any(issues for issues in validation_issues.values()):
+                    issue_details = "\n".join(
+                        f"{category}: {', '.join(issues)}"
+                        for category, issues in validation_issues.items()
+                        if issues
+                    )
+                    self.logger.warning(f"Validation issues found:\n{issue_details}")
+
+            return df
+
     def _setup_logging(self):
         """Configure logging for the ingestion process."""
         logging.basicConfig(
@@ -46,41 +65,3 @@ class DataIngestion:
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         )
         self.logger = logging.getLogger(__name__)
-
-    def read_data(
-        self,
-        table: Optional[str] = None,
-        filters: Optional[Dict] = None,
-        validate: bool = True,
-    ) -> pd.DataFrame:
-        """Read data from the configured source."""
-        if isinstance(self.source, EPADataSource):
-            self.logger.info("Reading EPA data from GraphQL endpoint")
-            df = self.source.fetch_data(table=table, filters=filters)
-
-            # Apply preprocessing before validation
-            df = self.source.preprocess_data(df)
-
-            if validate:
-                self.logger.info("Validating data")
-                validation_issues = self.validator.validate_dataframe(df)
-
-                has_issues = any(issues for issues in validation_issues.values())
-                if has_issues:
-                    issue_details = "\n".join(
-                        f"{category}: {', '.join(issues)}"
-                        for category, issues in validation_issues.items()
-                        if issues
-                    )
-                    self.logger.warning(f"Validation issues found:\n{issue_details}")
-                    # Don't raise an error, just log the issues
-
-            return df
-
-        elif self.source is not None:
-            self.logger.info("Reading data from DataSource")
-            df = self.source.fetch_data()
-            return df
-        else:
-            self.logger.info("Reading data from files")
-            return self.read_and_validate_all_files()

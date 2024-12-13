@@ -1,14 +1,13 @@
 # src/config.py
 EPA_CONFIG = {
-    "graphql_url": "https://data.epa.gov/dmapservice/query/graphql",
-    "batch_size": 10,
+    "base_url": "https://data.epa.gov/efservice",
+    "tables": {
+        "facilities": "ghg.pub_dim_facility",
+        "emissions": "ghg.pub_facts_sector_ghg_emission",
+    },
+    "batch_size": 1000,
     "timeout": 30,
     "max_retries": 3,
-    "tables": {
-        "ghg": "ghg__rlps_ghg_emitter_sector",
-        "facilities": "frs_facility",
-        "emissions": "facility_emissions",
-    },
 }
 
 EPA_TABLES_QUERY = """
