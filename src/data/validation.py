@@ -13,7 +13,12 @@ class GHGDataValidator:
         self.logger = logging.getLogger(__name__)
 
         # Define expected columns and their types
-        self.required_columns = {"date": "datetime64[ns]", "emissions": "float64"}
+        self.required_columns = {
+            "emissions": "float64",  # renamed from co2e_emission
+            "facility_name": "object",
+            "county": "object",
+            "sector_name": "object",
+        }
 
         # Define valid ranges for emissions data
         self.validation_rules = {
@@ -25,6 +30,8 @@ class GHGDataValidator:
 
     def validate_dataframe(self, df: pd.DataFrame) -> Dict[str, List[str]]:
         """Validate a DataFrame against GHG data requirements."""
+        self.logger.debug(f"Validating DataFrame with columns: {df.columns.tolist()}")
+
         issues = {
             "missing_columns": [],
             "type_errors": [],
@@ -32,43 +39,39 @@ class GHGDataValidator:
             "date_errors": [],
         }
 
-        # Check required columns
-        for col in self.required_columns:
-            if col not in df.columns:
+        # Check for empty DataFrame
+        if df is None or df.empty:
+            issues["missing_columns"].append("DataFrame is empty")
+            return issues
+
+        # Check required columns (allowing for both original and renamed columns)
+        for col, expected_type in self.required_columns.items():
+            original_col = "co2e_emission" if col == "emissions" else col
+            if col not in df.columns and original_col not in df.columns:
                 issues["missing_columns"].append(f"Missing required column: {col}")
 
-        if not issues["missing_columns"]:
-            # Handle date column separately
-            if "date" in df.columns:
-                try:
-                    # Try to convert dates and catch any conversion errors
-                    df["date"] = pd.to_datetime(df["date"], format="%Y-%m-%d")
-                except (ValueError, TypeError):
-                    issues["date_errors"].append("Invalid date format in date column")
-                else:
-                    # Check for future dates only if conversion succeeded
-                    future_dates = df["date"] > pd.Timestamp.now()
-                    if future_dates.any():
-                        issues["date_errors"].append("Found dates in the future")
+        # If we have critical missing columns, return early
+        if issues["missing_columns"]:
+            return issues
 
-            # Handle emissions column
-            if "emissions" in df.columns:
-                try:
-                    df["emissions"] = pd.to_numeric(df["emissions"], errors="raise")
-                except (ValueError, TypeError):
-                    issues["type_errors"].append(
-                        "Column emissions contains non-numeric values"
+        # Validate emissions data
+        emissions_col = "emissions" if "emissions" in df.columns else "co2e_emission"
+        if emissions_col in df.columns:
+            try:
+                df[emissions_col] = pd.to_numeric(df[emissions_col], errors="coerce")
+                rules = self.validation_rules["emissions"]
+                invalid_emissions = df[emissions_col].notna() & (
+                    (df[emissions_col] < rules["min"])
+                    | (df[emissions_col] > rules["max"])
+                )
+                if invalid_emissions.any():
+                    issues["value_errors"].append(
+                        f"Column {emissions_col} contains values outside valid range "
+                        f"[{rules['min']}, {rules['max']}]"
                     )
-                else:
-                    # Check value ranges only if conversion succeeded
-                    rules = self.validation_rules["emissions"]
-                    mask = (df["emissions"] < rules["min"]) | (
-                        df["emissions"] > rules["max"]
-                    )
-                    if mask.any():
-                        issues["value_errors"].append(
-                            f"Column emissions contains values outside valid range "
-                            f"[{rules['min']}, {rules['max']}]"
-                        )
+            except (ValueError, TypeError):
+                issues["type_errors"].append(
+                    f"Column {emissions_col} contains non-numeric values"
+                )
 
         return issues

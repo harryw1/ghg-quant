@@ -1,3 +1,4 @@
+# src/data/sources/epa.py
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -6,8 +7,8 @@ from typing import Dict, List, Optional
 import pandas as pd
 import requests
 
-from ...config import EPA_CONFIG
-from .queries import EPA_GHG_QUERY
+from ...config import EPA_CONFIG, EPA_TABLES_QUERY
+from .queries import EPA_GHG_QUERY, SCHEMA_QUERY
 
 
 class EPADataSource:
@@ -19,6 +20,34 @@ class EPADataSource:
         self.graphql_url = "https://data.epa.gov/dmapservice/query/graphql"
         self.logger = logging.getLogger(__name__)
         self.cleanup_batches = cleanup_batches
+
+    def discover_available_tables(self):
+        """Discover available tables."""
+        try:
+            response = requests.post(
+                self.graphql_url,
+                json={"query": EPA_TABLES_QUERY},
+                headers={"Content-Type": "application/json"},
+                timeout=EPA_CONFIG["timeout"],
+            )
+            return response.json()
+        except Exception as e:
+            self.logger.error(f"Error discovering available tables: {e}")
+            return None
+
+    def check_schema(self):
+        """Debug method to check available schema."""
+        try:
+            response = requests.post(
+                self.graphql_url,
+                json={"query": SCHEMA_QUERY},
+                headers={"Content-Type": "application/json"},
+                timeout=EPA_CONFIG["timeout"],
+            )
+            return response.json()
+        except Exception as e:
+            self.logger.error(f"Error checking schema: {e}")
+            return None
 
     def _cleanup_batch_files(self, batch_files: List[Path]) -> None:
         """Clean up individual batch files after successful combination."""
@@ -34,161 +63,173 @@ class EPADataSource:
         self,
         table: Optional[str] = None,
         filters: Optional[Dict] = None,
-        limit: int = 10,
+        limit: int = 50000,  # Set a high limit to attempt to fetch all data
         offset: int = 0,
     ) -> pd.DataFrame:
         """Fetch data using GraphQL."""
+        self.discover_available_tables()
+
         try:
             variables = {
                 "offset": offset,
                 "limit": limit,
-                "orderBy": [{"tier1_co2_combustion_emissions": "desc"}],
+                "state": self.state_code,
+                "year": self.year,
             }
 
-            headers = {"Content-Type": "application/json", "Accept": "application/json"}
-            payload = {"query": EPA_GHG_QUERY, "variables": variables}
-
-            self.logger.debug(f"Making GraphQL request to {self.graphql_url}")
-            self.logger.debug(f"Query payload: {payload}")
+            self.logger.debug(f"Making GraphQL request with variables: {variables}")
 
             response = requests.post(
                 self.graphql_url,
-                json=payload,
-                headers=headers,
+                json={"query": EPA_GHG_QUERY, "variables": variables},
+                headers={"Content-Type": "application/json"},
                 timeout=EPA_CONFIG["timeout"],
             )
 
-            response.raise_for_status()
+            self.logger.debug(f"Response status: {response.status_code}")
+            self.logger.debug(f"Response content: {response.text}")
+
+            if response.status_code != 200:
+                self.logger.error(
+                    f"API Error: {response.status_code} - {response.text}"
+                )
+                raise ValueError(
+                    f"API request failed with status {response.status_code}"
+                )
+
             data = response.json()
 
             if "errors" in data:
                 self.logger.error(f"GraphQL errors: {data['errors']}")
                 raise ValueError(f"GraphQL errors: {data['errors']}")
 
-            records = data["data"]["ghg__c_fuel_level_information"]
-            df = pd.DataFrame.from_records(records)
+            records = data.get("data", {}).get("ghg__rlps_ghg_emitter_sector", [])
 
-            if df.empty:
+            if not records:
                 self.logger.warning(
-                    f"No data found for {self.state_code} in {self.year}"
+                    f"No data found for state {self.state_code} (offset: {offset})"
                 )
                 return pd.DataFrame()
 
-            batch_num = offset // limit
-            data_dir = Path("data/raw")
-            data_dir.mkdir(parents=True, exist_ok=True)
-
-            batch_path = (
-                data_dir / f"epa_{self.state_code}_{self.year}_batch_{batch_num}.csv"
-            )
-            df.to_csv(batch_path, index=False)
+            # Create DataFrame from records
+            df = pd.DataFrame.from_records(records)
 
             self.logger.info(
-                f"Successfully fetched {len(df)} records (batch {batch_num})"
+                f"Successfully fetched {len(df)} records for {self.state_code}"
             )
             return df
 
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Error fetching EPA data: {e}")
-            raise ValueError(f"Failed to fetch EPA data: {e}")
         except Exception as e:
-            self.logger.error(f"Unexpected error: {e}")
+            self.logger.error(f"Error fetching data: {e}")
             raise
 
-    def get_data(
-        self,
-        table: Optional[str] = None,
-        filters: Optional[Dict] = None,
-        batch_size: int = 10,
-    ) -> pd.DataFrame:
-        """Get all data using pagination."""
-        all_data = []
-        offset = 0
-        batch_files = []
-        data_dir = Path("data/raw")
-        data_dir.mkdir(parents=True, exist_ok=True)
-
-        while True:
-            df_batch = self.fetch_data(
-                table=table, filters=filters, limit=batch_size, offset=offset
-            )
-
-            if df_batch.empty:
-                break
-
-            all_data.append(df_batch)
-
-            batch_num = offset // batch_size
-            batch_file = (
-                data_dir / f"epa_{self.state_code}_{self.year}_batch_{batch_num}.csv"
-            )
-            batch_files.append(batch_file)
-
-            offset += batch_size
-
-            if len(df_batch) < batch_size:
-                break
-
-        if not all_data:
-            self.logger.warning("No data collected from any batch")
-            return pd.DataFrame()
-
         try:
-            df_combined = pd.concat(all_data, ignore_index=True)
+            variables = {
+                "offset": offset,
+                "limit": limit,
+                "state_name": self.state_code,
+            }
 
-            combined_path = data_dir / f"epa_{self.state_code}_{self.year}_combined.csv"
-            df_combined.to_csv(combined_path, index=False)
+            self.logger.debug(f"Making GraphQL request with variables: {variables}")
+
+            response = requests.post(
+                self.graphql_url,
+                json={"query": EPA_GHG_QUERY, "variables": variables},
+                headers={"Content-Type": "application/json"},
+                timeout=EPA_CONFIG["timeout"],
+            )
+
+            self.logger.debug(f"Response status: {response.status_code}")
+            self.logger.debug(f"Response content: {response.text}")
+
+            if response.status_code != 200:
+                self.logger.error(
+                    f"API Error: {response.status_code} - {response.text}"
+                )
+                raise ValueError(
+                    f"API request failed with status {response.status_code}"
+                )
+
+            data = response.json()
+
+            if "errors" in data:
+                self.logger.error(f"GraphQL errors: {data['errors']}")
+                raise ValueError(f"GraphQL errors: {data['errors']}")
+
+            records = data.get("data", {}).get("ghg__rlps_ghg_emitter_gas", [])
+
+            if not records:
+                self.logger.warning(
+                    f"No data found for state {self.state_code} (offset: {offset})"
+                )
+                return pd.DataFrame()
+
+            # Create DataFrame from records
+            df = pd.DataFrame.from_records(records)
+
+            # Do initial preprocessing here
+            if not df.empty:
+                # Rename columns
+                df = df.rename(
+                    columns={"co2e_emission": "emissions", "state_name": "state"}
+                )
+
+                # Filter by year if specified
+                if self.year is not None:
+                    df = df[df["year"] == self.year]
 
             self.logger.info(
-                f"Combined {len(batch_files)} batches into {combined_path} "
-                f"with {len(df_combined)} total records"
+                f"Successfully fetched {len(df)} records for {self.state_code} "
+                f"(batch {offset//limit})"
             )
-
-            # Verify the combined file
-            if not combined_path.exists():
-                raise FileNotFoundError(
-                    f"Failed to create combined file at {combined_path}"
-                )
-
-            df_verification = pd.read_csv(combined_path)
-            if len(df_verification) != len(df_combined):
-                raise ValueError(
-                    f"Combined file verification failed: "
-                    f"Expected {len(df_combined)} records but found {len(df_verification)}"
-                )
-
-            # Clean up batch files if requested
-            if self.cleanup_batches:
-                self.logger.info("Cleaning up batch files...")
-                self._cleanup_batch_files(batch_files)
-
-            return self.preprocess_data(df_combined)
+            return df
 
         except Exception as e:
-            self.logger.error(f"Error combining batch files: {e}")
-            self.logger.info("Attempting to recover from batch files...")
-
-            recovered_data = []
-            for batch_file in batch_files:
-                if batch_file.exists():
-                    try:
-                        df_batch = pd.read_csv(batch_file)
-                        recovered_data.append(df_batch)
-                    except Exception as batch_error:
-                        self.logger.error(
-                            f"Error reading batch file {batch_file}: {batch_error}"
-                        )
-
-            if recovered_data:
-                df_recovered = pd.concat(recovered_data, ignore_index=True)
-                self.logger.info(
-                    f"Recovered {len(df_recovered)} records from batch files"
-                )
-                return self.preprocess_data(df_recovered)
-            else:
-                raise ValueError("Failed to recover data from batch files") from e
+            self.logger.error(f"Error fetching data: {str(e)}", exc_info=True)
+            raise
 
     def preprocess_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Preprocess the data."""
-        # Add any preprocessing steps here
+        """Preprocess the data into standard format."""
+        if df is not None and not df.empty:
+            # Rename columns
+            column_mapping = {
+                "co2e_emission": "emissions",
+                "sector_name": "industry",  # Map sector to industry for consistency
+                "facility_name": "facility",
+            }
+            # Apply mapping for columns that exist
+            for old_col, new_col in column_mapping.items():
+                if old_col in df.columns and new_col not in df.columns:
+                    df = df.rename(columns={old_col: new_col})
+
+            # Convert numeric columns
+            numeric_columns = {
+                "year": "int64",
+                "emissions": "float64",
+                "latitude": "float64",
+                "longitude": "float64",
+            }
+
+            for col, dtype in numeric_columns.items():
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+                    df[col] = df[col].astype(dtype)
+
+            # Create combined sector field if needed
+            if all(col in df.columns for col in ["sector_name", "subsector_name"]):
+                df["sector_full"] = df["sector_name"] + " - " + df["subsector_name"]
+
+            # Add date column based on year
+            if "year" in df.columns and "date" not in df.columns:
+                df["date"] = pd.to_datetime(df["year"].astype(str), format="%Y")
+
+            # Remove any duplicate records
+            df = df.drop_duplicates()
+
+            # Sort by year and emissions
+            if all(col in df.columns for col in ["year", "emissions"]):
+                df = df.sort_values(["year", "emissions"], ascending=[False, False])
+
+            self.logger.debug(f"Preprocessed DataFrame columns: {df.columns.tolist()}")
+
         return df

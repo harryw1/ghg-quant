@@ -16,35 +16,94 @@ class RegionalAnalysis:
         self.df = df
         self.logger = logging.getLogger(__name__)
 
+        if self.df.empty:
+            self.logger.warning("Initialized with empty DataFrame")
+
     def county_statistics(self) -> Dict[str, pd.Series]:
         """Calculate county-level statistics."""
-        stats = {
-            "total_emissions": self.df.groupby("county")["emissions"].sum(),
-            "avg_emissions": self.df.groupby("county")["emissions"].mean(),
-            "facility_count": self.df.groupby("county")["facility"].nunique(),
-            "industry_count": self.df.groupby("county")["industry"].nunique(),
-            "emissions_per_facility": (
-                self.df.groupby("county")["emissions"].sum()
-                / self.df.groupby("county")["facility"].nunique()
-            ),
-        }
-        return stats
+        if self.df.empty:
+            self.logger.warning("No data available for county statistics")
+            return {}
+
+        # Check if required columns exist
+        required_cols = ["county", "emissions", "facility_name", "sector_name"]
+        missing_cols = [col for col in required_cols if col not in self.df.columns]
+        if missing_cols:
+            self.logger.error(f"Missing required columns: {missing_cols}")
+            return {
+                "total_emissions": pd.Series(dtype=float),
+                "avg_emissions": pd.Series(dtype=float),
+                "facility_count": pd.Series(dtype=int),
+                "sector_count": pd.Series(dtype=int),
+                "emissions_per_facility": pd.Series(dtype=float),
+            }
+
+        try:
+            stats = {
+                "total_emissions": self.df.groupby("county")["emissions"].sum(),
+                "avg_emissions": self.df.groupby("county")["emissions"].mean(),
+                "facility_count": self.df.groupby("county")["facility_name"].nunique(),
+                "sector_count": self.df.groupby("county")["sector_name"].nunique(),
+                "emissions_per_facility": (
+                    self.df.groupby("county")["emissions"].sum()
+                    / self.df.groupby("county")["facility_name"].nunique()
+                ),
+            }
+            return stats
+        except Exception as e:
+            self.logger.error(f"Error calculating county statistics: {e}")
+            return {
+                "total_emissions": pd.Series(dtype=float),
+                "avg_emissions": pd.Series(dtype=float),
+                "facility_count": pd.Series(dtype=int),
+                "sector_count": pd.Series(dtype=int),
+                "emissions_per_facility": pd.Series(dtype=float),
+            }
 
     def industry_analysis(self) -> Dict[str, pd.DataFrame]:
-        """Analyze emissions by industry."""
-        return {
-            "by_industry": self.df.groupby("industry")["emissions"].agg(
-                ["sum", "mean", "count"]
-            ),
-            "industry_by_county": pd.pivot_table(
-                self.df,
-                values="emissions",
-                index="county",
-                columns="industry",
-                aggfunc="sum",
-                fill_value=0,
-            ),
-        }
+        """Analyze emissions by industry/sector."""
+        if self.df.empty:
+            self.logger.warning("No data available for industry analysis")
+            return {
+                "by_sector": pd.DataFrame(),
+                "sector_by_county": pd.DataFrame(),
+                "subsector_analysis": pd.DataFrame(),
+            }
+
+        try:
+            return {
+                "by_sector": self.df.groupby("sector_name")["emissions"].agg(
+                    ["sum", "mean", "count"]
+                )
+                if "sector_name" in self.df.columns
+                else pd.DataFrame(),
+                "sector_by_county": pd.pivot_table(
+                    self.df,
+                    values="emissions",
+                    index="county",
+                    columns="sector_name",
+                    aggfunc="sum",
+                    fill_value=0,
+                )
+                if all(col in self.df.columns for col in ["county", "sector_name"])
+                else pd.DataFrame(),
+                "subsector_analysis": (
+                    self.df.groupby(["sector_name", "subsector_name"])["emissions"]
+                    .sum()
+                    .unstack(fill_value=0)
+                )
+                if all(
+                    col in self.df.columns for col in ["sector_name", "subsector_name"]
+                )
+                else pd.DataFrame(),
+            }
+        except Exception as e:
+            self.logger.error(f"Error in industry analysis: {e}")
+            return {
+                "by_sector": pd.DataFrame(),
+                "sector_by_county": pd.DataFrame(),
+                "subsector_analysis": pd.DataFrame(),
+            }
 
     def temporal_analysis(self) -> Dict[str, pd.Series]:
         """Analyze temporal trends."""
@@ -108,25 +167,27 @@ class RegionalAnalysis:
             self.logger.error(f"Error creating county map: {e}")
 
     def _create_industry_plot(self, output_path: Path) -> None:
-        """Create industry analysis plots."""
+        """Create sector analysis plots."""
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 12))
 
-        # Top industries by emissions
-        industry_emissions = (
-            self.df.groupby("industry")["emissions"].sum().sort_values(ascending=True)
+        # Top sectors by emissions
+        sector_emissions = (
+            self.df.groupby("sector_name")["emissions"]
+            .sum()
+            .sort_values(ascending=True)
         )
-        industry_emissions.plot(kind="barh", ax=ax1)
-        ax1.set_title("Total Emissions by Industry")
+        sector_emissions.plot(kind="barh", ax=ax1)
+        ax1.set_title("Total Emissions by Sector")
 
-        # Industry composition by county
-        industry_county = pd.crosstab(
+        # Sector composition by county
+        sector_county = pd.crosstab(
             self.df["county"],
-            self.df["industry"],
+            self.df["sector_name"],
             values=self.df["emissions"],
             aggfunc="sum",
         )
-        industry_county.plot(kind="bar", stacked=True, ax=ax2)
-        ax2.set_title("Industry Composition by County")
+        sector_county.plot(kind="bar", stacked=True, ax=ax2)
+        ax2.set_title("Sector Composition by County")
         plt.xticks(rotation=45)
 
         plt.tight_layout()

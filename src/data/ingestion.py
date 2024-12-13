@@ -56,26 +56,31 @@ class DataIngestion:
         """Read data from the configured source."""
         if isinstance(self.source, EPADataSource):
             self.logger.info("Reading EPA data from GraphQL endpoint")
-            df = self.source.get_data(table=table, filters=filters)
+            df = self.source.fetch_data(table=table, filters=filters)
+
+            # Apply preprocessing before validation
+            df = self.source.preprocess_data(df)
+
+            if validate:
+                self.logger.info("Validating data")
+                validation_issues = self.validator.validate_dataframe(df)
+
+                has_issues = any(issues for issues in validation_issues.values())
+                if has_issues:
+                    issue_details = "\n".join(
+                        f"{category}: {', '.join(issues)}"
+                        for category, issues in validation_issues.items()
+                        if issues
+                    )
+                    self.logger.warning(f"Validation issues found:\n{issue_details}")
+                    # Don't raise an error, just log the issues
+
+            return df
+
         elif self.source is not None:
             self.logger.info("Reading data from DataSource")
-            df = self.source.get_data()
+            df = self.source.fetch_data()
+            return df
         else:
             self.logger.info("Reading data from files")
             return self.read_and_validate_all_files()
-
-        if validate:
-            self.logger.info("Validating data")
-            validation_issues = self.validator.validate_dataframe(df)
-
-            has_issues = any(issues for issues in validation_issues.values())
-            if has_issues:
-                issue_details = "\n".join(
-                    f"{category}: {', '.join(issues)}"
-                    for category, issues in validation_issues.items()
-                    if issues
-                )
-                self.logger.error(f"Validation failed:\n{issue_details}")
-                raise ValueError("Data validation failed")
-
-        return df
