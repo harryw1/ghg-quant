@@ -19,6 +19,34 @@ class RegionalAnalysis:
         if self.df.empty:
             self.logger.warning("Initialized with empty DataFrame")
 
+        # Log available columns for debugging
+        self.logger.info(f"Available columns: {self.df.columns.tolist()}")
+
+        # Verify required columns
+        required_columns = {
+            "emissions": ["emissions", "co2e_emission"],
+            "sector": ["sector_name", "industry", "sector", "sector_type"],
+            "county": ["county"],
+            "facility": ["facility_name", "facility"],
+        }
+
+        self.column_mapping = {}
+        for key, alternatives in required_columns.items():
+            found_col = next(
+                (col for col in alternatives if col in self.df.columns), None
+            )
+            if found_col:
+                self.column_mapping[key] = found_col
+            else:
+                self.logger.warning(
+                    f"No column found for {key} data. Alternatives were: {alternatives}"
+                )
+
+        # Verify geo data availability
+        geo_file = Path("data/geo/cb_2017_us_county_20m.geojson")
+        if not geo_file.exists():
+            self.logger.error(f"County boundaries file not found: {geo_file}")
+
     def county_statistics(self) -> Dict[str, pd.Series]:
         """Calculate county-level statistics."""
         if self.df.empty:
@@ -139,60 +167,213 @@ class RegionalAnalysis:
     def _create_county_map(self, output_path: Path) -> None:
         """Create county-level emissions map."""
         try:
-            # Load county boundaries (you'll need to provide this data)
-            counties_gdf = gpd.read_file(
-                f"data/geo/{self.df['state'].iloc[0]}_counties.geojson"
-            )
+            # Load GeoJSON for all US counties
+            counties_gdf = gpd.read_file("data/geo/cb_2017_us_county_20m.geojson")
 
-            # Merge with emissions data
+            # Create a state FIPS lookup for filtering
+            state_fips = {
+                "AL": "01",
+                "AK": "02",
+                "AZ": "04",
+                "AR": "05",
+                "CA": "06",
+                "CO": "08",
+                "CT": "09",
+                "DE": "10",
+                "FL": "12",
+                "GA": "13",
+                "HI": "15",
+                "ID": "16",
+                "IL": "17",
+                "IN": "18",
+                "IA": "19",
+                "KS": "20",
+                "KY": "21",
+                "LA": "22",
+                "ME": "23",
+                "MD": "24",
+                "MA": "25",
+                "MI": "26",
+                "MN": "27",
+                "MS": "28",
+                "MO": "29",
+                "MT": "30",
+                "NE": "31",
+                "NV": "32",
+                "NH": "33",
+                "NJ": "34",
+                "NM": "35",
+                "NY": "36",
+                "NC": "37",
+                "ND": "38",
+                "OH": "39",
+                "OK": "40",
+                "OR": "41",
+                "PA": "42",
+                "RI": "44",
+                "SC": "45",
+                "SD": "46",
+                "TN": "47",
+                "TX": "48",
+                "UT": "49",
+                "VT": "50",
+                "VA": "51",
+                "WA": "53",
+                "WV": "54",
+                "WI": "55",
+                "WY": "56",
+            }
+
+            # Filter for the state we're analyzing
+            state_code = self.df["state"].iloc[0] if not self.df.empty else None
+            if state_code in state_fips:
+                counties_gdf = counties_gdf[
+                    counties_gdf["STATEFP"] == state_fips[state_code]
+                ]
+
+            # Create a mapping dictionary from county name to emissions
             emissions_by_county = self.df.groupby("county")["emissions"].sum()
-            counties_gdf["emissions"] = counties_gdf["COUNTY"].map(emissions_by_county)
 
-            # Create map
+            # Create a mapping between county names and GEOID
+            county_mapping = {}
+            for idx, row in counties_gdf.iterrows():
+                county_name = row["NAME"].upper()
+                county_mapping[county_name] = row["GEOID"]
+
+            # Map emissions to GeoDataFrame
+            counties_gdf["emissions"] = 0.0  # Initialize with zeros
+            for county, emissions in emissions_by_county.items():
+                county_name = county.upper().replace(" COUNTY", "").strip()
+                matching_geoids = [
+                    geoid
+                    for name, geoid in county_mapping.items()
+                    if county_name in name or name in county_name
+                ]
+                if matching_geoids:
+                    counties_gdf.loc[
+                        counties_gdf["GEOID"] == matching_geoids[0], "emissions"
+                    ] = emissions
+
+            # Create the map
             fig, ax = plt.subplots(figsize=(15, 10))
+
+            # Plot counties with emissions data
             counties_gdf.plot(
                 column="emissions",
                 ax=ax,
                 legend=True,
-                legend_kwds={"label": "Total Emissions (metric tons CO2e)"},
+                legend_kwds={
+                    "label": "Total Emissions (metric tons CO2e)",
+                    "orientation": "horizontal",
+                },
                 missing_kwds={"color": "lightgrey"},
                 cmap="YlOrRd",
             )
 
-            plt.title(f"GHG Emissions by County - {self.df['state'].iloc[0]}")
+            # Add county boundaries
+            counties_gdf.boundary.plot(ax=ax, color="black", linewidth=0.5)
+
+            # Add county labels for counties with emissions
+            for idx, row in counties_gdf.iterrows():
+                if row["emissions"] > 0:
+                    centroid = row["geometry"].centroid
+                    ax.annotate(
+                        row["NAME"],
+                        xy=(centroid.x, centroid.y),
+                        xytext=(3, 3),
+                        textcoords="offset points",
+                        fontsize=8,
+                        ha="center",
+                    )
+
+            plt.title(f"GHG Emissions by County - {state_code}")
+            plt.axis("off")
+            plt.tight_layout()
+
+            # Save the figure
             plt.savefig(output_path, bbox_inches="tight", dpi=300)
             plt.close()
 
         except Exception as e:
-            self.logger.error(f"Error creating county map: {e}")
+            self.logger.error(f"Error creating county map: {e}", exc_info=True)
 
     def _create_industry_plot(self, output_path: Path) -> None:
         """Create sector analysis plots."""
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 12))
+        try:
+            # First, determine which column contains sector information
+            sector_columns = ["sector_name", "industry", "sector", "sector_type"]
+            sector_col = next(
+                (col for col in sector_columns if col in self.df.columns), None
+            )
 
-        # Top sectors by emissions
-        sector_emissions = (
-            self.df.groupby("sector_name")["emissions"]
-            .sum()
-            .sort_values(ascending=True)
-        )
-        sector_emissions.plot(kind="barh", ax=ax1)
-        ax1.set_title("Total Emissions by Sector")
+            if sector_col is None:
+                self.logger.error("No sector/industry column found in DataFrame")
+                return
 
-        # Sector composition by county
-        sector_county = pd.crosstab(
-            self.df["county"],
-            self.df["sector_name"],
-            values=self.df["emissions"],
-            aggfunc="sum",
-        )
-        sector_county.plot(kind="bar", stacked=True, ax=ax2)
-        ax2.set_title("Sector Composition by County")
-        plt.xticks(rotation=45)
+            # Check for emissions column
+            emissions_col = (
+                "emissions" if "emissions" in self.df.columns else "co2e_emission"
+            )
+            if emissions_col not in self.df.columns:
+                self.logger.error("No emissions data column found")
+                return
 
-        plt.tight_layout()
-        plt.savefig(output_path, bbox_inches="tight", dpi=300)
-        plt.close()
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 12))
+
+            # Top sectors by emissions
+            try:
+                sector_emissions = (
+                    self.df.groupby(sector_col)[emissions_col]
+                    .sum()
+                    .sort_values(ascending=True)
+                )
+                sector_emissions.plot(kind="barh", ax=ax1)
+                ax1.set_title("Total Emissions by Sector")
+                ax1.set_xlabel("Emissions")
+                ax1.set_ylabel("Sector")
+            except Exception as e:
+                self.logger.error(f"Error creating sector emissions plot: {e}")
+                ax1.text(
+                    0.5, 0.5, "Error creating sector plot", ha="center", va="center"
+                )
+
+            # Sector composition by county
+            try:
+                if "county" in self.df.columns:
+                    sector_county = pd.crosstab(
+                        self.df["county"],
+                        self.df[sector_col],
+                        values=self.df[emissions_col],
+                        aggfunc="sum",
+                    )
+                    sector_county.plot(kind="bar", stacked=True, ax=ax2)
+                    ax2.set_title("Sector Composition by County")
+                    ax2.set_xlabel("County")
+                    ax2.set_ylabel("Emissions")
+                    plt.xticks(rotation=45)
+                else:
+                    self.logger.warning(
+                        "No county column found for sector composition plot"
+                    )
+                    ax2.text(
+                        0.5, 0.5, "No county data available", ha="center", va="center"
+                    )
+            except Exception as e:
+                self.logger.error(f"Error creating sector composition plot: {e}")
+                ax2.text(
+                    0.5,
+                    0.5,
+                    "Error creating composition plot",
+                    ha="center",
+                    va="center",
+                )
+
+            plt.tight_layout()
+            plt.savefig(output_path, bbox_inches="tight", dpi=300)
+            plt.close()
+
+        except Exception as e:
+            self.logger.error(f"Error in _create_industry_plot: {e}")
 
     def _create_temporal_plots(self, output_path: Path) -> None:
         """Create temporal analysis plots."""

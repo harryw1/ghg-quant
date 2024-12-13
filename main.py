@@ -111,6 +111,10 @@ def analyze_state_emissions(
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
+        if df is not None:
+            print("\nAvailable columns in the data:")
+            print(df.columns.tolist())
+
         # Check if we got any data
         if df.empty:
             logger.warning(f"No data found for {state_name}")
