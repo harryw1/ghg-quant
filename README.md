@@ -24,7 +24,6 @@ ghg-quant/
 │   └── geo/                     # Geographic data files for mapping
 ├── src/
 │   ├── analysis/               # Analysis modules
-│   │   ├── calculations.py     # Core metric calculations
 │   │   └── regional.py        # Regional analysis functionality
 │   ├── data/                  # Data processing modules
 │   │   ├── sources/          # Data source implementations
