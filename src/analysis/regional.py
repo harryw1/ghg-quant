@@ -12,7 +12,6 @@ class RegionalAnalysis:
     """Regional emissions analysis."""
 
     def __init__(self, df: pd.DataFrame):
-        """Initialize regional analysis."""
         self.df = df
         self.logger = logging.getLogger(__name__)
 
@@ -20,28 +19,27 @@ class RegionalAnalysis:
             self.logger.warning("Initialized with empty DataFrame")
 
         # Log available columns for debugging
-        self.logger.info(f"Available columns: {self.df.columns.tolist()}")
+        self.logger.info(f"Available columns: {df.columns.tolist()}")
 
-        # Verify required columns
+        # Update required columns mapping
         required_columns = {
-            "emissions": ["emissions", "co2e_emission"],
-            "sector": ["sector_name", "industry", "sector", "sector_type"],
+            "emissions": ["emissions", "ghg_quantity", "co2e_emission"],
+            "sector": ["sector", "reported_industry_types", "industry_type"],
             "county": ["county"],
             "facility": ["facility_name", "facility"],
+            "date": ["date", "year"],  # Add year as alternative for date
         }
 
+        # Make validation more flexible
         self.column_mapping = {}
         for key, alternatives in required_columns.items():
-            found_col = next(
-                (col for col in alternatives if col in self.df.columns), None
-            )
+            found_col = next((col for col in alternatives if col in df.columns), None)
             if found_col:
                 self.column_mapping[key] = found_col
             else:
                 self.logger.warning(
-                    f"No column found for {key} data. Alternatives were: {alternatives}"
+                    f"No column found for {key}. Alternatives were: {alternatives}"
                 )
-
         # Verify geo data availability
         geo_file = Path("data/geo/cb_2017_us_county_20m.geojson")
         if not geo_file.exists():

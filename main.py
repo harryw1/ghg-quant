@@ -1,5 +1,4 @@
 # main.py
-import json
 import logging
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -14,7 +13,6 @@ def analyze_state_emissions(
     state_code: str,
     year: Optional[int] = None,
     output_dir: Optional[str] = None,
-    table: str = "ghg__rlps_ghg_emitter_sector",
 ) -> Tuple[Optional[pd.DataFrame], Optional[Dict]]:
     """Analyze emissions for a specific state."""
     logger = logging.getLogger(__name__)
@@ -91,20 +89,14 @@ def analyze_state_emissions(
         # Initialize data ingestion with EPA source
         ingestion = DataIngestion(source="epa", state_code=state_code, year=year)
 
-        # Check schema
-        schema = ingestion.source.check_schema()
-        print("Available schema:", json.dumps(schema, indent=2))
-
-        # Create filters dict only with non-None values
-        filters = {}
-        if state_code:
-            filters["state_code"] = state_code
-        if year:
-            filters["year"] = year
-
         # Read and validate data
         logger.info("Fetching and validating data...")
-        df = ingestion.read_data(table=table, filters=filters)
+        df = ingestion.read_data()
+
+        # Create filters dict
+        filters = {"state": state_code}
+        if year:
+            filters["year"] = year
 
         # Set up output directory
         output_dir = output_dir or f"output/{state_code.lower()}"
@@ -180,7 +172,7 @@ def main():
     table = input("Enter table name (press Enter for default GHG data): ").strip()
     table = table if table else "ghg__rlps_ghg_emitter_sector"
 
-    df, stats = analyze_state_emissions(state_code, year, table=table)
+    df, stats = analyze_state_emissions(state_code, year)
 
     if df is None or df.empty:
         print("\nNo data available for analysis")
